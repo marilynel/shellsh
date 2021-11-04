@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
@@ -6,7 +7,7 @@
 #include <sys/types.h> // pid_t
 #include <sys/wait.h> // for waitpid
 #include <unistd.h> // fork
-#include <ctype.h>
+
 
 //int status = 0;
 
@@ -107,7 +108,6 @@ int main(){
         }
         args[i] = NULL;
         
-        //checkForRedirect(args);
         int writeTo, writeFrom = 0;
         int writeToIndex, writeFromIndex = 0;
         for (int j = 0; j < i; j++) {
@@ -120,6 +120,15 @@ int main(){
                 writeFrom = 1;
                 writeFromIndex = j;
                 //printf("other ok\n");
+            }
+            if (strcmp(args[j],"$$") == 0) {
+                pid_t pid = getpid();
+                char pidchar[80];
+                
+                sprintf(pidchar, "%d", pid);
+                printf("%d\t%s\n", pid, pidchar);
+                args[j] = calloc(strlen(pidchar)+1, sizeof(char));
+                strcpy(args[j], pidchar);
             }
         }
         // int out, savestdout = 0;
@@ -148,6 +157,7 @@ int main(){
             break;
         case 0: ;     
             int out, savestdout = 0;
+            int infd = -1;
             if (writeTo == 1) {
                 out = open(args[writeToIndex+1], O_WRONLY | O_CREAT | O_TRUNC, 0640);
                 //int savestdout = dup(1);
@@ -155,7 +165,14 @@ int main(){
                 // TODO: what if command is miswritten?
                 if (out == -1) {
                     perror("error  in open()\n");
-                    continue;
+                    exit(1);
+                }
+            }
+            if (writeFrom == 1) {
+                infd = open(args[writeFromIndex+1], O_RDONLY, 0640);
+                if (infd == -1) {
+                    perror("error  in open()\n");
+                    exit(1);
                 }
             }
             if (writeTo == 1) {
@@ -165,6 +182,14 @@ int main(){
                     exit(1);
                 }
                 args[writeToIndex] = NULL;
+            }
+            if (writeFrom == 1) {
+                int result = dup2(infd, 0);
+                if (result == -1) {
+                    perror("error in dup2()\n");
+                    exit(1);
+                }
+                args[writeFromIndex] = NULL;
             }
             
             execvp(args[0], args);
