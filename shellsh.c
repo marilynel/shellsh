@@ -106,7 +106,7 @@ int main(){
             }            
         }
         args[i] = NULL;
-
+        
         //checkForRedirect(args);
         int writeTo, writeFrom = 0;
         int writeToIndex, writeFromIndex = 0;
@@ -122,22 +122,18 @@ int main(){
                 //printf("other ok\n");
             }
         }
-        int out, savestdout = 0;
-        if (writeTo == 1) {
-            out = open(args[writeToIndex+1], O_WRONLY | O_CREAT | O_TRUNC, 0640);
-            int savestdout = dup(1);
-            printf("%s\t%d\n", args[writeToIndex+1],out);
-            // TODO: what if command is miswritten?
-            if (out == -1) {
-                perror("error  in open()\n");
-                continue;
-            }
-            // int result = dup2(out, 1);
-            // if (result = -1) {
-            //     perror("error in dup2()\n");
-            //     continue;
-            // }
-        }
+        // int out, savestdout = 0;
+        // if (writeTo == 1) {
+        //     out = open(args[writeToIndex+1], O_WRONLY | O_CREAT | O_TRUNC, 0640);
+        //     //int savestdout = dup(1);
+        //     printf("%s\t%d\n", args[writeToIndex+1],out);
+        //     // TODO: what if command is miswritten?
+        //     if (out == -1) {
+        //         perror("error  in open()\n");
+        //         continue;
+        //     }
+        // }
+        
 
 
 
@@ -151,61 +147,28 @@ int main(){
             exit(1);
             break;
         case 0: ;     
-            // child process          
-            // list of arguments from command/input prompt
-            // char *args[512];
-            // char* token;
-            // char* firstCommand;
-            // token = strtok(command, " ");
-            // args[0] = calloc(strlen(token)+1, sizeof(char));
-            // strcpy(args[0], token);
-            // firstCommand = calloc(strlen(token)+1, sizeof(char));
-            // strcpy(firstCommand, token);
-            // int i = 1;
-            // while (token != NULL) {
-            //     token = strtok(NULL, " ");
-            //     if (token != NULL) {
-            //         args[i] = calloc(strlen(token)+1, sizeof(char));
-            //         strcpy(args[i], token);
-            //         i++;
-            //     }            
-            // }
-            // args[i] = NULL;
-
-            // //checkForRedirect(args);
-            // int writeTo, writeFrom = 0;
-            // int writeToIndex, writeFromIndex = 0;
-            // for (int j = 0; j < i; j++) {
-            //     if (strcmp(args[j],">") == 0) {
-            //         writeTo = 1;
-            //         writeToIndex = j;
-            //         //printf("ok\n");
-            //     }
-            //     if (strcmp(args[j],"<") == 0) {
-            //         writeFrom = 1;
-            //         writeFromIndex = j;
-            //         //printf("other ok\n");
-            //     }
-            // }
-
+            int out, savestdout = 0;
             if (writeTo == 1) {
-                //int out = open(args[writeToIndex+1], O_WRONLY | O_CREAT | O_TRUNC, 0640);
+                out = open(args[writeToIndex+1], O_WRONLY | O_CREAT | O_TRUNC, 0640);
+                //int savestdout = dup(1);
                 //printf("%s\t%d\n", args[writeToIndex+1],out);
                 // TODO: what if command is miswritten?
-                // if (out == -1) {
-                //     perror("error  in open()\n");
-                //     continue;
-                // }
-                int result = dup2(out, 1);
-                if (result = -1) {
-                    perror("error in dup2()\n");
+                if (out == -1) {
+                    perror("error  in open()\n");
                     continue;
                 }
             }
-
+            if (writeTo == 1) {
+                int result = dup2(out, 1);
+                if (result == -1) {
+                    perror("error in dup2()\n");
+                    exit(1);
+                }
+                args[writeToIndex] = NULL;
+            }
+            
             execvp(args[0], args);
-            status = 2;
-            exit(status);
+            exit(2);
 
         default:
             // in the parent process
@@ -215,17 +178,22 @@ int main(){
             status = -1;            // just in case there is an issue
             if (WIFEXITED(child)) {
                 status = WEXITSTATUS(child);
-                printf("in parent: exit value %d\n",status);
+                //printf("in parent: exit value %d\n",status);
             }
-            if (out > 0) {
-                close(out);
-                dup2(savestdout, 1);
-                close(savestdout);
-            }
+            writeTo = 0;
+            writeFrom = 0;
+            
+            //if (out > 0) {
+            //    close(out);
+            //    dup2(savestdout, 1);
+            //    close(savestdout);
+            //}
             //status = WEXITSTATUS(status);       
             //printf("exit value %d\n",exit_status);
         }
     }
     return 0;
 }
+
+
 
