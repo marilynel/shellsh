@@ -9,25 +9,32 @@
 #include <unistd.h> // fork
 
 
-//int status = 0;
+int foregroundMode = 0;         // if 0 -> not in foreground mode; if 1 -> foreground only mode
+int sigtstpNotice = 0;          // if latch = 0 -> don't print foreground message; if 1 -> print foreground message
 
 // handler function for SIGINT: ctrl+c
 void handle_SIGINT(int signo) {
-    char* message = "terminated by signal 2\n";
-    write(STDOUT_FILENO, message, 24);
+    // do nothing when ctrl+c is hit, ignore signal
 }
 
-// handler for SIGUSR2
+// handler for SIGUSR2 for handling "exit" command
 void handle_SIGUSR2(int signo) {
     exit(0);
 }
 
-
+// handler function for SIGSTP: ctrl+z
+void handle_SIGTSTP(int signo) {
+    if (foregroundMode == 1) {
+        foregroundMode = 0;
+    } else {
+        foregroundMode = 1;
+    }
+    sigtstpNotice = 1;
+}
 
 
 int main(){
-
-    struct sigaction SIGINT_action = {0}, SIGUSR2_action = {0};
+    struct sigaction SIGINT_action = {0}, SIGUSR2_action = {0}, SIGTSTP_action = {0};
 
     // fill in SIGINT_actino struct for blocking SIGINT
     SIGINT_action.sa_handler = handle_SIGINT;
@@ -41,54 +48,71 @@ int main(){
     SIGUSR2_action.sa_flags = 0;
     sigaction(SIGUSR2, &SIGUSR2_action, NULL);
 
+    // fill in SIGTSTP_action struct for blocking SIGTSTP
+    SIGTSTP_action.sa_handler = handle_SIGTSTP;
+    sigfillset(&SIGTSTP_action.sa_mask);
+    SIGTSTP_action.sa_flags = 0;
+    sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+
+    // initialize status
     int status = 0;   
     while (1) {
+        // check for SIGTSTP interruption
+        if (sigtstpNotice == 1) {
+            if (foregroundMode == 0) {
+                printf("\nExiting foreground-only mode\n");
+                fflush(stdout);
+            } else if (foregroundMode == 1) {
+                printf("\nEntering foreground-only mode (& is now ignored)\n");
+                fflush(stdout);
+            }
+            sigtstpNotice = 0;
+        }
+
         char command_array[2048];
         char *command = &command_array[0];
-        int len = 2048;
+        memset(command_array,0,2048);           // set values in command array to 0
         printf(":");
+        fflush(stdout);
         fgets(command, 2048, stdin);
 
         // 'fgets' keeps the newline at the end; strip '\n' from the end of the command
         command[strcspn(command, "\n")] = 0;
 
+        // check for whitespace in front of command and skip it
         while(isspace(*command)) {
             command++;
         }
 
+        // check for comments
         if (strncmp(command, "#", 1) == 0) {
             continue;
         }
 
+        // check for user just hitting 'enter'
         if (command[0] == '\0') {
             continue;
         }
 
+        // exit program command
         if (strcmp(command,"exit") == 0) {
             raise(SIGUSR2);
         }
         
+        // status command
         if (strcmp(command,"status") == 0) {       
             printf("exit value %d\n",status);
+            fflush(stdout);
             continue;
         }
 
-        // cd to another dir
+        // cd command
         if (strncmp(command,"cd ", 3) == 0) {
-            // return -1 if error
-            status = chdir(command+3);    // ptr arith: command->"cd .." thus command+3->".."
-            // &command[3]   
-            // printf("ok\n");                 
-            // system("pwd");
-            // #define PATH_MAX 200
-            // char cwd[200];
-            // if (getcwd(cwd, sizeof(cwd)) != NULL) {
-            //     printf("Current working dir: %s\n", cwd);
-            // } 
+            status = chdir(command+3);              // ptr arith: command->"cd .." thus command+3->".."
             continue;
         }
 
-        
+        // tokenize command array to turn into array for execvp()
         char *args[512];
         char* token;
         char* firstCommand;
@@ -106,46 +130,35 @@ int main(){
                 i++;
             }            
         }
-        args[i] = NULL;
-        
-        int writeTo, writeFrom = 0;
+        args[i] = NULL;     // set last item in args to null
+
+        // look for <, >, $$, and & in command and set corresponding flags
+        int writeTo, writeFrom, ampersand = 0;
         int writeToIndex, writeFromIndex = 0;
         for (int j = 0; j < i; j++) {
             if (strcmp(args[j],">") == 0) {
                 writeTo = 1;
                 writeToIndex = j;
-                //printf("ok\n");
             }
             if (strcmp(args[j],"<") == 0) {
                 writeFrom = 1;
                 writeFromIndex = j;
-                //printf("other ok\n");
             }
+
+            // replace '$$' with pid
             if (strcmp(args[j],"$$") == 0) {
                 pid_t pid = getpid();
                 char pidchar[80];
                 
                 sprintf(pidchar, "%d", pid);
-                printf("%d\t%s\n", pid, pidchar);
                 args[j] = calloc(strlen(pidchar)+1, sizeof(char));
                 strcpy(args[j], pidchar);
             }
         }
-        // int out, savestdout = 0;
-        // if (writeTo == 1) {
-        //     out = open(args[writeToIndex+1], O_WRONLY | O_CREAT | O_TRUNC, 0640);
-        //     //int savestdout = dup(1);
-        //     printf("%s\t%d\n", args[writeToIndex+1],out);
-        //     // TODO: what if command is miswritten?
-        //     if (out == -1) {
-        //         perror("error  in open()\n");
-        //         continue;
-        //     }
-        // }
-        
 
-
-
+        if (strcmp(args[i-1],"&")==0) {
+            ampersand = 1;
+        }
 
         // spawn a child to run exec function
         int child;
@@ -155,23 +168,21 @@ int main(){
             perror("forked up\n");
             exit(1);
             break;
-        case 0: ;     
+        case 0: ;    
+            // open new files, if necessary 
             int out, savestdout = 0;
             int infd = -1;
             if (writeTo == 1) {
                 out = open(args[writeToIndex+1], O_WRONLY | O_CREAT | O_TRUNC, 0640);
-                //int savestdout = dup(1);
-                //printf("%s\t%d\n", args[writeToIndex+1],out);
-                // TODO: what if command is miswritten?
                 if (out == -1) {
-                    perror("error  in open()\n");
+                    perror("cannot open file for input");
                     exit(1);
                 }
             }
             if (writeFrom == 1) {
                 infd = open(args[writeFromIndex+1], O_RDONLY, 0640);
                 if (infd == -1) {
-                    perror("error  in open()\n");
+                    perror("cannot open file for input");
                     exit(1);
                 }
             }
@@ -191,30 +202,29 @@ int main(){
                 }
                 args[writeFromIndex] = NULL;
             }
+
+            if (ampersand == 1) {
+                // run this command in the background
+            }
             
+            // exec function to run command
             execvp(args[0], args);
+            // following only invoked if exec fails:
             exit(2);
 
         default:
             // in the parent process
-            // get status of last child and save as status
             spawnpid = waitpid(spawnpid, &child, 0);
-            // chekc if child returned normally
-            status = -1;            // just in case there is an issue
+            // check if child returned normally
+            status = -1;      
             if (WIFEXITED(child)) {
                 status = WEXITSTATUS(child);
-                //printf("in parent: exit value %d\n",status);
             }
+            fflush(stdout);
+            // reset variables
             writeTo = 0;
             writeFrom = 0;
-            
-            //if (out > 0) {
-            //    close(out);
-            //    dup2(savestdout, 1);
-            //    close(savestdout);
-            //}
-            //status = WEXITSTATUS(status);       
-            //printf("exit value %d\n",exit_status);
+            ampersand = 0;
         }
     }
     return 0;
